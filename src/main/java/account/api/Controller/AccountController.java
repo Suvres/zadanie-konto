@@ -4,8 +4,8 @@ import account.api.DTO.AccountNameDTO;
 import account.api.DTO.AccountNumberDTO;
 import account.api.DTO.CustomerDTO;
 import account.api.Entity.AccountData;
+import account.api.Service.AccountGuardService;
 import account.api.Service.AccountService;
-import account.api.Service.CustomerService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -19,56 +19,57 @@ public class AccountController {
     private AccountService accountService;
 
     @Autowired
-    private CustomerService customerService;
+    private AccountGuardService accountGuardService;
 
-    @GetMapping("/test")
-    public String test() {
-        return "Hello World";
-    }
+    @GetMapping(value = "/account/{accountNumber}", produces = {MediaType.APPLICATION_JSON_VALUE})
+    public ResponseEntity<AccountData> getAccountData(@PathVariable String accountNumber) {
+        AccountData data = this.accountService.fetchDetails(accountNumber);
 
-    @GetMapping("/account/{accountNumber}")
-    public AccountData getAccountData(@PathVariable String accountNumber) {
-        return this.accountService.fetchDetails(accountNumber);
+        if(data == null) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
+        }
+
+        return ResponseEntity.status(HttpStatus.OK).body(data);
     }
 
     @PatchMapping(value = "/account/{accountNumber}", consumes = {MediaType.APPLICATION_JSON_VALUE})
-    public ResponseEntity<String> patchAccountData(@PathVariable String accountNumber, @RequestParam AccountNameDTO accountNameDTO) {
-        AccountData accountData = this.accountService.fetchDetails(accountNumber);
-         if (accountData == null) {
-             return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
+    public ResponseEntity<String> patchAccountData(@PathVariable String accountNumber, @RequestBody AccountNameDTO accountNameDTO) {
+        HttpStatus checkStatus = this.accountGuardService.checkAccountIsFound(accountNumber);
+        if (checkStatus != null) {
+             return ResponseEntity.status(checkStatus).build();
         }
 
-        this.accountService.modifyAccountName(accountNumber, accountNameDTO.accountName);
+        this.accountService.modifyAccountName(accountNumber, accountNameDTO.getAccountName());
         return ResponseEntity.status(HttpStatus.OK).build();
     }
 
     @DeleteMapping("/account/{accountNumber}")
-    public ResponseEntity<String> closeAccount(@PathVariable String accountNumber) {
-        AccountData accountData = this.accountService.fetchDetails(accountNumber);
-        if (accountData == null) {
-            return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
+    public ResponseEntity<String> closeAccount(@PathVariable String accountNumber) throws Exception {
+        HttpStatus checkStatus = this.accountGuardService.checkAccountIsFound(accountNumber);
+        if (checkStatus != null) {
+            return ResponseEntity.status(checkStatus).build();
         }
 
         this.accountService.close(accountNumber);
-
         return ResponseEntity.status(HttpStatus.OK).build();
     }
 
     @PutMapping(value = "/account", consumes = {MediaType.APPLICATION_JSON_VALUE})
     public ResponseEntity<AccountNumberDTO> createAccount(@RequestBody CustomerDTO customerDTO) {
-
-        if (customerDTO.personalId == null || customerDTO.personalId.trim().length() == 0) {
-            return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).build();
-        }
-
-        if (!this.customerService.hasCustomerFile(customerDTO.personalId, customerDTO.firstName, customerDTO.lastName)) {
-            return ResponseEntity.status(HttpStatus.NOT_ACCEPTABLE).build();
+        HttpStatus status = this.accountGuardService.canCreateNewAccount(customerDTO);
+        if(status != null) {
+            return ResponseEntity.status(status).build();
         }
 
         String accountNumber = this.accountService.createAndReturnAccountNumber(
-                customerDTO.personalId,
-                customerDTO.productType,
-                customerDTO.accountName);
+                customerDTO.getPersonalId(),
+                customerDTO.getProductType(),
+                customerDTO.getAccountName());
+
+        // Error on account create -> for example, same productType
+        if (accountNumber == null) {
+            return ResponseEntity.status(HttpStatus.NOT_ACCEPTABLE).build();
+        }
 
         return ResponseEntity.status(HttpStatus.OK).body(new AccountNumberDTO(accountNumber));
     }
